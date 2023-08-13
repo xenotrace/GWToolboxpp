@@ -204,16 +204,11 @@ void Updater::DrawSettingInternal() {
     ImGui::Text("Update mode:");
     const float btnWidth = 180.0f * ImGui::GetIO().FontGlobalScale;
     ImGui::SameLine(ImGui::GetContentRegionAvail().x - btnWidth);
-    if (ImGui::Button(step == Checking ? "Checking..." : "Check for updates",ImVec2(btnWidth,0)) && step != Checking) {
-        CheckForUpdate(true);
-    }
-    ImGui::RadioButton("Do not check for updates", (int*) & mode, (int)Mode::DontCheckForUpdates);
-    ImGui::RadioButton("Check and display a message", (int*)&mode, (int)Mode::CheckAndWarn);
-    ImGui::RadioButton("Check and ask before updating", (int*)&mode, (int)Mode::CheckAndAsk);
-    ImGui::RadioButton("Check and automatically update", (int*)&mode, (int)Mode::CheckAndAutoUpdate);
+    ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Disabled");
 }
 
 void Updater::CheckForUpdate(const bool forced) {
+    return;
     if (!GetCurrentVersionInfo(&current_release)) {
         Log::Error("Failed to get current toolbox version info");
     }
