@@ -206,8 +206,8 @@ void GameWorldRenderer::Render(IDirect3DDevice9* device)
         }
     }
 
-    if (GW::Map::GetInstanceType() == GW::Constants::InstanceType::Loading) {
-        // perhaps not actually needed, but it's here to be safe.
+    if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Explorable) {
+        // same behaviour as CustomRenderer
         return;
     }
 
@@ -219,8 +219,9 @@ void GameWorldRenderer::Render(IDirect3DDevice9* device)
         Log::Error("GameWorldRenderer: unable to SetPixelShader, aborting render.");
         return;
     }
+
     if (device->SetVertexDeclaration(vertex_declaration) != D3D_OK) {
-        Log::Error("GameWorldRenderer: unable to SetVertexShader declaration, aborting render.");
+        Log::Error("GameWorldRenderer: unable to SetVertexDeclaration, aborting render.");
         return;
     }
 
