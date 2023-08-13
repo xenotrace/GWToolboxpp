@@ -69,3 +69,10 @@ target_link_libraries(GWToolboxdll PRIVATE
     # libs:
     Dbghelp.lib # for MiniDump
     )
+
+add_custom_command(
+    TARGET GWToolboxdll POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/GWToolboxdll.dll
+        "C:/Program Files (x86)/Guild Wars/GWToolboxdll.dll"
+)

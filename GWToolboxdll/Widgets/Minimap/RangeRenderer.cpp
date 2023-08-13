@@ -146,7 +146,7 @@ void RangeRenderer::Initialize(IDirect3DDevice9 *device)
     ASSERT(vertices < vertices_max);
 
     // Shadowstep location aggro range
-    radius = GW::Constants::Range::Earshot;
+    radius = 1800.0f;
     vertices += CreateCircle(vertices, radius, color_range_shadowstep_aggro);
     ASSERT(vertices < vertices_max);
 

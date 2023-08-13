@@ -722,6 +722,7 @@ void AgentRenderer::Render(IDirect3DDevice9* device) {
                 continue; // 8. marked targets
             if (AddCustomAgentsToDraw(living))
                 continue; // 3. custom colored models
+            if (living->player_number >= 230 && living->player_number <= 346) continue;
         }
         other_agents_to_draw.push_back(agent);
     }
