@@ -207,8 +207,9 @@ void Updater::DrawSettingInternal() {
     ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Disabled");
 }
 
-void Updater::CheckForUpdate(const bool forced) {
+void Updater::CheckForUpdate(const bool) {
     return;
+    /*
     if (!GetCurrentVersionInfo(&current_release)) {
         Log::Error("Failed to get current toolbox version info");
     }
@@ -259,6 +260,7 @@ void Updater::CheckForUpdate(const bool forced) {
             break;
         }
     });
+    */
 }
 
 void Updater::Draw(IDirect3DDevice9*) {
