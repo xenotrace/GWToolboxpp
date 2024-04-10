@@ -3,15 +3,15 @@ cmake_minimum_required(VERSION 3.16)
 project(gwtoolbox)
 
 set(GWTOOLBOXEXE_VERSION "4.0")
-set(GWTOOLBOXDLL_VERSION "6.10")
+set(GWTOOLBOXDLL_VERSION "6.12")
 set(GWTOOLBOXDLL_VERSION_BETA "") # can be anything. Marks beta version if not empty.
-set(GWTOOBOX_MODULE_VERSION "6,10,0,0") # used for Dll module info. See GWToolboxdll/GWToolbox.rc
+set(GWTOOLBOX_MODULE_VERSION "6,12,0,0") # used for Dll module info. See GWToolboxdll/GWToolbox.rc
 
 # this is no longer required, but in case we have to add an installer again some day
 # configure_file(${PROJECT_SOURCE_DIR}/gwtoolbox.wxs.in ${PROJECT_SOURCE_DIR}/gwtoolbox.wxs @ONLY)
 
-if(MSVC_TOOLSET_VERSION LESS 142)
-    message(FATAL_ERROR "Build using Visual Studio 2019 toolset (v142) or higher. Run cmake with `-T142`. You're currently using ${MSVC_TOOLSET_VERSION}")
+if(MSVC_TOOLSET_VERSION LESS 143)
+    message(FATAL_ERROR "Build using Visual Studio 2022 toolset (v143) or higher. Run cmake with `-T143`. You're currently using ${MSVC_TOOLSET_VERSION}")
 endif()
 
 if(NOT(CMAKE_SIZEOF_VOID_P EQUAL 4))
@@ -28,7 +28,7 @@ add_compile_definitions(
     "GWTOOLBOXEXE_VERSION=\"${GWTOOLBOXEXE_VERSION}\""
     "GWTOOLBOXDLL_VERSION=\"${GWTOOLBOXDLL_VERSION}\""
     "GWTOOLBOXDLL_VERSION_BETA=\"${GWTOOLBOXDLL_VERSION_BETA}\""
-    "GWTOOLBOX_MODULE_VERSION=${GWTOOBOX_MODULE_VERSION}"
+    "GWTOOLBOX_MODULE_VERSION=${GWTOOLBOX_MODULE_VERSION}"
     )
 	
 add_compile_options(/MP /permissive-)
@@ -46,7 +46,6 @@ include(gwca)
 include(imgui)
 include(wintoast)
 include(directxtex)
-include(utf8proc)
 include(easywsclient)
 include(simpleini)
 include(discord_game_sdk)
