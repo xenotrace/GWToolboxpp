@@ -19,6 +19,7 @@
 
 #include <GWCA/Context/GameContext.h>
 #include <GWCA/Context/WorldContext.h>
+#include <GWCA/Context/AccountContext.h>
 
 #include <GWCA/Managers/MapMgr.h>
 #include <GWCA/Managers/ChatMgr.h>
@@ -51,6 +52,7 @@
 #include <GWCA/Utilities/Hooker.h>
 #include <Modules/GwDatTextureModule.h>
 #include <Utils/ToolboxUtils.h>
+#include <GWCA/Context/MapContext.h>
 
 namespace {
     enum class Status {
@@ -90,6 +92,9 @@ namespace {
     GW::HookEntry OnDialogBody_Entry;
     GW::HookEntry OnDialogButton_Entry;
     GW::HookEntry OnSendDialog_Entry;
+
+    int pending_map_names = 1;
+    std::unordered_map<uint32_t,GuiUtils::EncString*> encoded_name_id_to_string;
 
     bool EncInfoField(const char* label, const wchar_t* enc_string)
     {
@@ -243,7 +248,7 @@ namespace {
         CheckAndWarnIfNotResigned();
     }
 
-    void CmdResignLog([[maybe_unused]] const wchar_t* cmd, [[maybe_unused]] const int argc, [[maybe_unused]] wchar_t** argv)
+    void CmdResignLog([[maybe_unused]] const wchar_t* cmd, [[maybe_unused]] const int argc, [[maybe_unused]] const LPWSTR* argv)
     {
         if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Explorable) {
             return;
@@ -283,6 +288,65 @@ namespace {
     {
         param_2[1] = static_cast<short>((param_1 - 1) / 0xff00) + 0x100;
         *param_2 = static_cast<short>((param_1 - 1) % 0xff00) + 0x100;
+    }
+
+    void DrawMapInfo(GW::Constants::MapID map_id) {
+        static char info_id[16];
+        snprintf(info_id, _countof(info_id), "map_info_%d", map_id);
+        ImGui::PushID(info_id);
+        auto type = "";
+        switch (GW::Map::GetInstanceType()) {
+        case GW::Constants::InstanceType::Outpost:
+            type = "Outpost\0\0\0";
+            break;
+        case GW::Constants::InstanceType::Explorable:
+            type = "Explorable";
+            break;
+        case GW::Constants::InstanceType::Loading:
+            type = "Loading\0\0\0";
+            break;
+        }
+        InfoField("Map ID", "%d", map_id);
+        ImGui::ShowHelp("Map ID is unique for each area");
+        InfoField("Map Region", "%d", GW::Map::GetRegion());
+        InfoField("Map District", "%d", GW::Map::GetDistrict());
+        InfoField("Map Type", type);
+        InfoField("Map file", "%lu", mapfile);
+        ImGui::ShowHelp("Map file is unique for each pathing map (e.g. used by minimap).\nMany different maps use the same map file");
+        if (ImGui::TreeNodeEx("Advanced", ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+            const GW::AreaInfo* map_info = GW::Map::GetMapInfo(map_id);
+            if (map_info) {
+                InfoField("Campaign", "%d", map_info->campaign);
+                InfoField("Continent", "%d", map_info->continent);
+                InfoField("Region", "%d", map_info->region);
+                InfoField("Type", "%d", map_info->type);
+                InfoField("Mission Complete?", "%d", ToolboxUtils::GetMissionState(GW::Map::GetMapID(), GW::PartyMgr::GetIsPartyInHardMode()));
+                InfoField("Instance Info Type", "%d", GW::Map::GetMapTypeInstanceInfo(map_info->type)->request_instance_map_type);
+                InfoField("Flags", "0x%X", map_info->flags);
+                InfoField("Thumbnail ID", "%d", map_info->thumbnail_id);
+                const auto m = GW::GetMapContext();
+                if (m) {
+                    InfoField("Map Boundaries", "%.0f, %.0f, %.0f, %.0f, %.0f", m->map_boundaries[0],m->map_boundaries[1],m->map_boundaries[2],m->map_boundaries[3],m->map_boundaries[4]);
+                }
+                GW::Vec2f pos = {static_cast<float>(map_info->x), static_cast<float>(map_info->y)};
+                InfoField("Map Pos", "%.2f, %.2f", pos.x, pos.y);
+                if (!pos.x) {
+                    pos.x = static_cast<float>(map_info->icon_start_x + (map_info->icon_end_x - map_info->icon_start_x) / 2);
+                    pos.y = static_cast<float>(map_info->icon_start_y + (map_info->icon_end_y - map_info->icon_start_y) / 2);
+                }
+                if (!pos.x) {
+                    pos.x = static_cast<float>(map_info->icon_start_x_dupe + (map_info->icon_end_x_dupe - map_info->icon_start_x_dupe) / 2);
+                    pos.y = static_cast<float>(map_info->icon_start_y_dupe + (map_info->icon_end_y_dupe - map_info->icon_start_y_dupe) / 2);
+                }
+                InfoField("Calculated Pos", "%.2f, %.2f", pos.x, pos.y);
+                static wchar_t name_enc[8];
+                if (GW::UI::UInt32ToEncStr(map_info->name_id, name_enc, 8)) {
+                    EncInfoField("Name Enc", name_enc);
+                }
+            }
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
     }
 
     void DrawSkillInfo(GW::Skill* skill, GuiUtils::EncString* name, const bool force_advanced = false)
@@ -585,18 +649,6 @@ namespace {
         ImGui::Checkbox("Show message in chat when you're the last player to resign", &show_last_to_resign_message);
     }
 
-    using GetQuestInfo_pt = void(__cdecl*)(GW::Constants::QuestID);
-    GetQuestInfo_pt RequestQuestInfo_Func = nullptr;
-
-    bool RequestQuestInfo(const GW::Constants::QuestID quest_id)
-    {
-        if (!RequestQuestInfo_Func) {
-            const uintptr_t address = GW::Scanner::Find("\x68\x4a\x01\x00\x10\xff\x77\x04", "xxxxxxxx", 0x7a);
-            RequestQuestInfo_Func = (GetQuestInfo_pt)GW::Scanner::FunctionFromNearCall(address);
-        }
-        return RequestQuestInfo_Func ? RequestQuestInfo_Func(quest_id), true : false;
-    }
-
     bool GetQuestEntryGroupName(const GW::Constants::QuestID quest_id, wchar_t* out, const size_t out_len)
     {
         const auto quest = GW::QuestMgr::GetQuest(quest_id);
@@ -620,7 +672,7 @@ namespace {
     CreateTexture_pt CreateTexture_Ret = nullptr;
 
     // Why reinvent the wheel?
-    typedef void(__cdecl* GWCA_SendUIMessage_pt)(GW::UI::UIMessage msgid, void* wParam, void* lParam);
+    typedef bool(__cdecl* GWCA_SendUIMessage_pt)(GW::UI::UIMessage msgid, void* wParam, void* lParam, bool skip_hooks);
     GWCA_SendUIMessage_pt GWCA_SendUIMessage_Func = nullptr;
     GWCA_SendUIMessage_pt GWCA_SendUIMessage_Ret = nullptr;
 
@@ -628,17 +680,19 @@ namespace {
         GW::UI::UIMessage msgid;
         void* wParam;
         void* lParam;
+        bool skip_hooks;
     };
 
     std::vector<UIMessagePacket*> ui_message_packets_recorded;
     bool record_ui_messages = false;
 
-    void OnGWCASendUIMessage(GW::UI::UIMessage msgid, void* wParam, void* lParam) {
+    bool OnGWCASendUIMessage(GW::UI::UIMessage msgid, void* wParam, void* lParam, bool skip_hooks) {
         GW::Hook::EnterHook();
-        GWCA_SendUIMessage_Ret(msgid, wParam, lParam);
+        auto res = GWCA_SendUIMessage_Ret(msgid, wParam, lParam, skip_hooks);
         if(record_ui_messages)
-            ui_message_packets_recorded.push_back(new UIMessagePacket({ msgid,wParam,lParam }));
+            ui_message_packets_recorded.push_back(new UIMessagePacket({ msgid,wParam,lParam, skip_hooks }));
         GW::Hook::LeaveHook();
+        return res;
     }
     void ClearUIMessagesRecorded() {
         for (auto p : ui_message_packets_recorded) {
@@ -647,9 +701,17 @@ namespace {
         ui_message_packets_recorded.clear();
     }
 
-    std::map<uint32_t,IDirect3DTexture9**> textures_created;
+    std::unordered_map<uint32_t,IDirect3DTexture9**> textures_created_by_file_id;
+    std::unordered_map<IDirect3DTexture9**,uint32_t> texture_file_ids;
+    std::vector<IDirect3DTexture9**> textures_created;
 
     bool record_textures = false;
+
+    void FileIdToFileHash(uint32_t file_id, wchar_t* fileHash) {
+        fileHash[0] = static_cast<wchar_t>(((file_id - 1) % 0xff00) + 0x100);
+        fileHash[1] = static_cast<wchar_t>(((file_id - 1) / 0xff00) + 0x100);
+        fileHash[2] = 0;
+    }
 
     uint32_t FileHashToFileId(wchar_t* param_1) {
         if (!param_1)
@@ -665,14 +727,47 @@ namespace {
         GW::Hook::EnterHook();
         const auto out = CreateTexture_Ret(file_name, flags);
         uint32_t file_id = FileHashToFileId(file_name);
-        if (record_textures && textures_created.find(file_id) == textures_created.end()) {
-            textures_created[file_id] = GwDatTextureModule::LoadTextureFromFileId(file_id);
+        if (textures_created_by_file_id.find(file_id) == textures_created_by_file_id.end()) {
+            const auto f = GwDatTextureModule::LoadTextureFromFileId(file_id);
+            textures_created.push_back(f);
+            textures_created_by_file_id[file_id] = f;
+            texture_file_ids[f] = file_id;
         }
         GW::Hook::LeaveHook();
         return out;
     }
 
     void DrawDebugInfo() {
+        if (ImGui::CollapsingHeader("Account Features")) {
+            const auto& features = GW::GetGameContext()->account->account_unlocked_counts;
+            ImGui::PushItemWidth(140.f);
+            ImGui::TextUnformatted("ID");
+            ImGui::SameLine();
+            ImGui::TextUnformatted("Value 1");
+            ImGui::SameLine();
+            ImGui::TextUnformatted("Value 2");
+            for (const auto& feature : features) {
+                ImGui::PushID(&feature);
+                ImGui::Text("0x%x",feature.id);
+                ImGui::SameLine();
+                ImGui::Text("%d",feature.unk1);
+                ImGui::SameLine();
+                ImGui::Text("%d",feature.unk2);
+                ImGui::PopID();
+            }
+        }
+        if (record_ui_messages) {
+            ImGui::PushID(&ui_message_packets_recorded);
+            if (ImGui::SmallButton("Reset")) {
+                ClearUIMessagesRecorded();
+            }
+            for (auto it : ui_message_packets_recorded) {
+                ImGui::PushID(it);
+                ImGui::Text("0x%08x 0x%08x 0x%08x", it->msgid, it->wParam, it->lParam);
+                ImGui::PopID();
+            }
+            ImGui::PopID();
+        }
         if (ImGui::CollapsingHeader("Quoted Item")) {
             ImGui::Text("Most recently quoted item (buy or sell) from trader");
             static GuiUtils::EncString quoted_name;
@@ -688,7 +783,9 @@ namespace {
             constexpr auto uv0 = ImVec2(0, 0);
 
             if (ImGui::SmallButton("Reset")) {
+                textures_created_by_file_id.clear();
                 textures_created.clear();
+                texture_file_ids.clear();
             }
 
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
@@ -697,9 +794,8 @@ namespace {
 
             ImGui::StartSpacedElements(scaled_size.x);
 
-            for (auto& it : textures_created) {
-                ImGui::PushID(it.first);
-                const auto texture = it.second;
+            for (const auto texture : textures_created) {
+                ImGui::PushID(texture);
                 if (!texture || !*texture) {
                     ImGui::PopID();
                     continue;
@@ -709,7 +805,9 @@ namespace {
                 ImGui::NextSpacedElement();
                 ImGui::ImageButton(*texture, scaled_size, uv0, uv1, -1, normal_bg, tint);
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("File ID 0x%08x", it.first);
+                    static wchar_t out[3] = { 0 };
+                    FileIdToFileHash(texture_file_ids[texture], out);
+                    ImGui::SetTooltip("File ID: 0x%08x\nFile Hash: 0x%04x 0x%04x", texture_file_ids[texture], out[0], out[1]);
                 }
                 ImGui::PopID();
             }
@@ -747,6 +845,9 @@ namespace {
         [[maybe_unused]] const GW::Player* me_player = me ? GW::PlayerMgr::GetPlayerByID(me->player_number) : nullptr;
         [[maybe_unused]] const GW::Chat::ChatBuffer* log = GW::Chat::GetChatLog();
         [[maybe_unused]] const GW::AreaInfo* ai = GW::Map::GetMapInfo(GW::Map::GetMapID());
+
+        const auto frame = GW::UI::GetFrameByLabel(L"Skillbar");
+        (frame);
     }
 }
 
@@ -790,7 +891,7 @@ void InfoWindow::Initialize()
     GWCA_SendUIMessage_Func = (GWCA_SendUIMessage_pt)GW::UI::SendUIMessage;
     if (GWCA_SendUIMessage_Func) {
         GW::HookBase::CreateHook(GWCA_SendUIMessage_Func, OnGWCASendUIMessage, (void**)&GWCA_SendUIMessage_Ret);
-        GW::HookBase::EnableHooks(GWCA_SendUIMessage_Func);
+        //GW::HookBase::EnableHooks(GWCA_SendUIMessage_Func);
     }
 }
 
@@ -852,60 +953,18 @@ void InfoWindow::Draw(IDirect3DDevice9*)
             ImGui::PopID();
         }
         if (show_map && ImGui::CollapsingHeader("Map")) {
-            ImGui::PushID("map_info");
-            auto type = "";
-            switch (GW::Map::GetInstanceType()) {
-                case GW::Constants::InstanceType::Outpost:
-                    type = "Outpost\0\0\0";
-                    break;
-                case GW::Constants::InstanceType::Explorable:
-                    type = "Explorable";
-                    break;
-                case GW::Constants::InstanceType::Loading:
-                    type = "Loading\0\0\0";
-                    break;
-            }
-            InfoField("Map ID", "%d", GW::Map::GetMapID());
-            ImGui::ShowHelp("Map ID is unique for each area");
-            InfoField("Map Region", "%d", GW::Map::GetRegion());
-            InfoField("Map District", "%d", GW::Map::GetDistrict());
-            InfoField("Map Type", type);
-            InfoField("Map file", "%lu", mapfile);
-            ImGui::ShowHelp("Map file is unique for each pathing map (e.g. used by minimap).\nMany different maps use the same map file");
-            if (ImGui::TreeNodeEx("Advanced", ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanAvailWidth)) {
-                const GW::AreaInfo* map_info = GW::Map::GetCurrentMapInfo();
-                if (map_info) {
-                    InfoField("Campaign", "%d", map_info->campaign);
-                    InfoField("Continent", "%d", map_info->continent);
-                    InfoField("Region", "%d", map_info->region);
-                    InfoField("Type", "%d", map_info->type);
-                    InfoField("Mission Complete?", "%d", ToolboxUtils::GetMissionState(GW::Map::GetMapID(), GW::PartyMgr::GetIsPartyInHardMode()));
-                    InfoField("Instance Info Type", "%d", GW::Map::GetMapTypeInstanceInfo(map_info->type)->request_instance_map_type);
-                    InfoField("Flags", "0x%X", map_info->flags);
-                    InfoField("Thumbnail ID", "%d", map_info->thumbnail_id);
-                    GW::Vec2f pos = {static_cast<float>(map_info->x), static_cast<float>(map_info->y)};
-                    InfoField("Map Pos", "%.2f, %.2f", pos.x, pos.y);
-                    if (!pos.x) {
-                        pos.x = static_cast<float>(map_info->icon_start_x + (map_info->icon_end_x - map_info->icon_start_x) / 2);
-                        pos.y = static_cast<float>(map_info->icon_start_y + (map_info->icon_end_y - map_info->icon_start_y) / 2);
-                    }
-                    if (!pos.x) {
-                        pos.x = static_cast<float>(map_info->icon_start_x_dupe + (map_info->icon_end_x_dupe - map_info->icon_start_x_dupe) / 2);
-                        pos.y = static_cast<float>(map_info->icon_start_y_dupe + (map_info->icon_end_y_dupe - map_info->icon_start_y_dupe) / 2);
-                    }
-                    InfoField("Calculated Pos", "%.2f, %.2f", pos.x, pos.y);
-                    static wchar_t name_enc[8];
-                    if (GW::UI::UInt32ToEncStr(map_info->name_id, name_enc, 8)) {
-                        EncInfoField("Name Enc", name_enc);
-                    }
-                }
-                ImGui::TreePop();
-            }
-            ImGui::PopID();
+            DrawMapInfo(GW::Map::GetMapID());
+        }
+        if (show_map && ImGui::CollapsingHeader("Lookup Map")) {
+            static int map_id = 0;
+            ImGui::InputInt("Map ID", &map_id, 1, 1);
+            const auto current = GW::Map::GetMapInfo(static_cast<GW::Constants::MapID>(map_id));
+            if(current)
+                DrawMapInfo(static_cast<GW::Constants::MapID>(map_id));
         }
         if (show_dialog && ImGui::CollapsingHeader("Dialog")) {
             EncInfoField("Dialog Body", DialogModule::GetDialogBody());
-            InfoField("Last Dialog", "0x%X", GW::Agents::GetLastDialogId());
+            InfoField("Last Dialog", "0x%X", DialogModule::LastDialogId());
             ImGui::Text("Available NPC Dialogs:");
             ImGui::ShowHelp("Talk to an NPC to see available dialogs");
             const auto& messages = DialogModule::GetDialogButtonMessages();
@@ -935,6 +994,14 @@ void InfoWindow::Draw(IDirect3DDevice9*)
             }
             DrawSkillInfo(GW::SkillbarMgr::GetSkillConstantData(last_hovered_skill_id), &skill_name, true);
         }
+        if (ImGui::CollapsingHeader("Lookup Skill")) {
+            static GuiUtils::EncString skill_name;
+            static int skill_id = 0;
+            ImGui::InputInt("Skill ID", &skill_id, 1, 1);
+            const auto current = GW::SkillbarMgr::GetSkillConstantData(static_cast<GW::Constants::SkillID>(skill_id));
+            if(current)
+                DrawSkillInfo(current, &skill_name, true);
+        }
         if (show_item && ImGui::CollapsingHeader("Hovered Item")) {
             static GuiUtils::EncString item_name;
             ImGui::PushID("hovered_item");
@@ -948,7 +1015,7 @@ void InfoWindow::Draw(IDirect3DDevice9*)
         if (show_item && ImGui::CollapsingHeader("Item")) {
             ImGui::Text("First item in inventory");
             static GuiUtils::EncString item_name;
-            DrawItemInfo(GW::Items::GetItemBySlot(GW::Constants::Bag::Backpack, 1), &item_name);
+            DrawItemInfo(GW::Items::GetItemBySlot(GW::Items::GetBag(GW::Constants::Bag::Backpack), 1), &item_name);
         }
         if (show_quest && ImGui::CollapsingHeader("Quest")) {
             const GW::Quest* q = GW::QuestMgr::GetActiveQuest();
@@ -976,7 +1043,7 @@ void InfoWindow::Draw(IDirect3DDevice9*)
             ImGui::SameLine();
             if (ImGui::SmallButton("Request quest info")) {
                 for (const auto& quest : quests_missing_info) {
-                    RequestQuestInfo(quest->quest_id);
+                    GW::QuestMgr::RequestQuestInfo(quest);
                 }
             }
 #endif

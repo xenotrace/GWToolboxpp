@@ -90,8 +90,6 @@ public:
     static void OnUpdateSkillCount(GW::HookStatus*, void* packet);
     static void OnAgentNameTag(GW::HookStatus* status, GW::UI::UIMessage msgid, void* wParam, void*);
     static void OnDialogUIMessage(GW::HookStatus*, GW::UI::UIMessage, void*, void*);
-    static void CmdReinvite(const wchar_t* message, int argc, LPWSTR* argv);
-
 private:
     void FactionEarnedCheckAndWarn();
     bool faction_checked = false;
@@ -109,7 +107,6 @@ private:
     bool stop_screen_shake = false;
     bool disable_camera_smoothing = false;
 
-    bool improve_move_to_cast = false;
     bool check_message_on_party_change = true;
 
     bool is_prompting_hard_mode_mission = false;

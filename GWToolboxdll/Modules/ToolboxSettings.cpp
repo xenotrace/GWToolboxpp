@@ -22,6 +22,7 @@
 #include <Modules/ChatLog.h>
 #include <Modules/HintsModule.h>
 #include <Modules/PluginModule.h>
+#include <Modules/QuestModule.h>
 #include <Modules/KeyboardLanguageFix.h>
 #if 0
 #include <Modules/GWFileRequester.h>
@@ -50,14 +51,17 @@
 #include <Windows/ObserverExportWindow.h>
 #include <Windows/CompletionWindow.h>
 #include <Windows/DupingWindow.h>
+#include <Windows/RerollWindow.h>
+#include <Windows/ArmoryWindow.h>
+
 #ifdef _DEBUG
 #include <Windows/PacketLoggerWindow.h>
 #include <Windows/DoorMonitorWindow.h>
 #include <Windows/StringDecoderWindow.h>
 #include <Windows/SkillListingWindow.h>
+#include <Windows/TargetInfoWindow.h>
+#include <Windows/PathfindingWindow.h>
 #endif
-#include <Windows/RerollWindow.h>
-#include <Windows/ArmoryWindow.h>
 
 #include <Widgets/TimerWidget.h>
 #include <Widgets/HealthWidget.h>
@@ -135,6 +139,7 @@ namespace {
         KeyboardLanguageFix::Instance(),
         ZrawDeepModule::Instance(),
         GuildWarsSettingsModule::Instance()
+        //QuestModule::Instance()
     };
 
     std::vector<WidgetToggle> optional_widgets = {
@@ -208,6 +213,7 @@ void ToolboxSettings::LoadModules(ToolboxIni* ini)
     GWToolbox::ToggleModule(StringDecoderWindow::Instance());
     GWToolbox::ToggleModule(DoorMonitorWindow::Instance());
     GWToolbox::ToggleModule(SkillListingWindow::Instance());
+    GWToolbox::ToggleModule(TargetInfoWindow::Instance());
 #endif
     for (const auto& m : optional_modules) {
         GWToolbox::ToggleModule(*m.toolbox_module, m.enabled);

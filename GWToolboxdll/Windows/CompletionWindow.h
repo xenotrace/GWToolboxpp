@@ -46,13 +46,19 @@ namespace Missions {
         virtual void CheckProgress(const std::wstring& player_name);
     };
 
+    class OutpostUnlock : public Mission {
+    public:
+        OutpostUnlock(GW::Constants::MapID map_id) : Mission(map_id) {};
+        void CheckProgress(const std::wstring& player_name) override;
+        bool Draw(IDirect3DDevice9*) override;
+    };
 
     class PvESkill : public Mission {
     protected:
         GW::Constants::SkillID skill_id;
 
     public:
-        uint32_t profession = 0;
+        GW::Constants::ProfessionByte profession = (GW::Constants::ProfessionByte)0;
         PvESkill(GW::Constants::SkillID _skill_id);
         bool IsDaily() override { return false; }
         bool HasQuest() override { return false; }

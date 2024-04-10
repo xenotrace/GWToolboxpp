@@ -40,6 +40,7 @@
 #include <GWCA/Managers/SkillbarMgr.h>
 #include <GWCA/Managers/StoCMgr.h>
 #include <GWCA/Managers/UIMgr.h>
+#include <GWCA/Managers/RenderMgr.h>
 
 #include <GWCA/Utilities/Hooker.h>
 
@@ -58,10 +59,12 @@
 #include <Timer.h>
 #include <Defines.h>
 #include <GWCA/Managers/QuestMgr.h>
+#include <d3d9on12.h>
 
 #include "Windows/FriendListWindow.h"
 
 #pragma warning(disable : 6011)
+#pragma comment(lib,"Version.lib")
 
 using namespace GuiUtils;
 using namespace ToolboxUtils;
@@ -221,33 +224,6 @@ namespace {
         NAME = 1,
         DESC = 2
     };
-
-    struct PendingCast {
-        uint32_t slot = 0;
-        uint32_t target_id = 0;
-        uint32_t call_target = 0;
-        bool cast_next_frame = false;
-
-        void reset(const uint32_t _slot = 0, const uint32_t _target_id = 0, const uint32_t _call_target = 0)
-        {
-            slot = _slot;
-            target_id = _target_id;
-            call_target = _call_target;
-            cast_next_frame = false;
-        }
-
-        [[nodiscard]] const GW::AgentLiving* GetTarget() const
-        {
-            const GW::AgentLiving* target = static_cast<GW::AgentLiving*>(GW::Agents::GetAgentByID(target_id));
-            return target && target->GetIsLivingType() ? target : nullptr;
-        }
-
-        [[nodiscard]] GW::Constants::SkillID GetSkill() const
-        {
-            const GW::Skillbar* skillbar = GW::SkillbarMgr::GetPlayerSkillbar();
-            return skillbar && skillbar->IsValid() ? skillbar->skills[slot].skill_id : GW::Constants::SkillID::No_Skill;
-        }
-    } pending_cast;
 
     struct [[maybe_unused]] SkillData {
         GW::Constants::Profession primary;
@@ -501,7 +477,7 @@ namespace {
     void OnMinOrRestoreOrExitBtnClicked(GW::UI::InteractionMessage* message, void* wparam, void* lparam)
     {
         GW::Hook::EnterHook();
-        if (message->message_id == 0x2f && wparam) {
+        if (message->message_id == GW::UI::UIMessage::kMouseAction && wparam) {
             struct MouseParams {
                 uint32_t button_id;
                 uint32_t button_id_dupe;
@@ -1067,6 +1043,11 @@ namespace {
                 break;
         }
     }
+
+    void CmdReinvite(const wchar_t*, const int, const LPWSTR*)
+    {
+        pending_reinvite.reset(current_party_target_id);
+    }
 }
 
 bool GameSettings::GetSettingBool(const char* setting)
@@ -1402,7 +1383,6 @@ void GameSettings::Initialize()
 
     GW::FriendListMgr::RegisterFriendStatusCallback(&FriendStatusCallback_Entry, FriendStatusCallback);
     RegisterUIMessageCallback(&OnPreSendDialog_Entry, GW::UI::UIMessage::kSendPingWeaponSet, OnPingWeaponSet);
-    GW::SkillbarMgr::RegisterUseSkillCallback(&OnCast_Entry, OnCast);
 
     constexpr GW::UI::UIMessage dialog_ui_messages[] = {
         GW::UI::UIMessage::kSendDialog,
@@ -1585,7 +1565,6 @@ void GameSettings::LoadSettings(ToolboxIni* ini)
     LOAD_BOOL(auto_accept_join_requests);
 
     LOAD_BOOL(skip_entering_name_for_faction_donate);
-    LOAD_BOOL(improve_move_to_cast);
     LOAD_BOOL(drop_ua_on_cast);
 
     LOAD_BOOL(lazy_chest_looting);
@@ -1742,7 +1721,6 @@ void GameSettings::SaveSettings(ToolboxIni* ini)
     SAVE_BOOL(auto_accept_invites);
     SAVE_BOOL(auto_accept_join_requests);
     SAVE_BOOL(skip_entering_name_for_faction_donate);
-    SAVE_BOOL(improve_move_to_cast);
     SAVE_BOOL(drop_ua_on_cast);
 
     SAVE_BOOL(lazy_chest_looting);
@@ -1877,6 +1855,7 @@ void GameSettings::DrawSettingsInternal()
     if (ImGui::Checkbox("Remove 1.5 second minimum for the cast bar to show.", &remove_min_skill_warmup_duration)) {
         remove_skill_warmup_duration_patch.TogglePatch(remove_min_skill_warmup_duration);
     }
+    ImGui::Checkbox("Disable camera smoothing", &disable_camera_smoothing);
 
     ImGui::Checkbox("Automatically skip cinematics", &auto_skip_cinematic);
     ImGui::Checkbox("Automatically return to outpost on defeat", &auto_return_on_defeat);
@@ -1906,8 +1885,6 @@ void GameSettings::DrawSettingsInternal()
     }
     ImGui::Checkbox("Apply Collector's Edition animations on player dance", &collectors_edition_emotes);
     ImGui::ShowHelp("Only applies to your own character");
-    ImGui::Checkbox("Disable camera smoothing", &disable_camera_smoothing);
-    ImGui::Checkbox("Improve move to cast spell range", &improve_move_to_cast);
     ImGui::ShowHelp("This should make you stop to cast skills earlier by re-triggering the skill cast when in range.");
     ImGui::Checkbox("Auto-cancel Unyielding Aura when re-casting", &drop_ua_on_cast);
     ImGui::Checkbox("Auto use available keys when interacting with locked chest", &auto_open_locked_chest_with_key);
@@ -2086,51 +2063,6 @@ void GameSettings::Update(float)
         cam->look_at_target = cam->look_at_to_go;
         cam->yaw = cam->yaw_to_go;
         cam->pitch = cam->pitch_to_go;
-    }
-
-    if (improve_move_to_cast && pending_cast.target_id) {
-        const GW::AgentLiving* me = GW::Agents::GetCharacter();
-        const GW::Skillbar* skillbar = GW::SkillbarMgr::GetPlayerSkillbar();
-        if (!me || !skillbar) // I don't exist e.g. map change
-        {
-            return pending_cast.reset();
-        }
-
-        const GW::AgentLiving* target = pending_cast.GetTarget();
-        if (!target) // Target no longer valid
-        {
-            return pending_cast.reset();
-        }
-
-        const uint32_t& casting = skillbar->casting;
-        if (pending_cast.cast_next_frame) {
-            // Do cast now
-            if (pending_cast.GetTarget()) {
-                GW::SkillbarMgr::UseSkill(pending_cast.slot, pending_cast.target_id, pending_cast.call_target);
-            }
-            pending_cast.reset();
-            return;
-        }
-
-        if (casting && me->GetIsMoving() && !me->skill && !me->GetIsCasting()) {
-            // casting/skill don't update fast enough, so delay the rupt
-            const auto cast_skill = pending_cast.GetSkill();
-            if (cast_skill == GW::Constants::SkillID::No_Skill) // Skill ID no longer valid
-            {
-                return pending_cast.reset();
-            }
-
-            const float range = GetSkillRange(cast_skill);
-            if (GetDistance(target->pos, me->pos) <= range && range > 0) {
-                Keypress(GW::UI::ControlAction::ControlAction_MoveBackward);
-                pending_cast.cast_next_frame = true;
-                return;
-            }
-        }
-        if (!casting) // abort the action if not auto walking anymore
-        {
-            return pending_cast.reset();
-        }
     }
 
 #ifdef APRIL_FOOLS
@@ -2365,7 +2297,7 @@ void GameSettings::OnFactionDonate(GW::HookStatus* status, GW::UI::UIMessage, vo
     }
     status->blocked = true;
     GW::PlayerMgr::DepositFaction(allegiance);
-    GW::Agents::GoNPC(GW::Agents::GetAgentByID(DialogModule::GetDialogAgent()));
+    GW::Agents::InteractAgent(GW::Agents::GetAgentByID(DialogModule::GetDialogAgent()));
 }
 
 // Show a message when player leaves the outpost
@@ -2524,11 +2456,6 @@ void GameSettings::OnMapTravel(const GW::HookStatus*, const GW::Packet::StoC::Ga
     }
 }
 
-void GameSettings::CmdReinvite(const wchar_t*, int, LPWSTR*)
-{
-    pending_reinvite.reset(current_party_target_id);
-}
-
 // Turn screenshots into clickable links
 void GameSettings::OnWriteChat(GW::HookStatus* status, GW::UI::UIMessage, void* wParam, void*)
 {
@@ -2637,25 +2564,6 @@ void GameSettings::OnOpenWiki(GW::HookStatus* status, const GW::UI::UIMessage me
         else {
             Log::Error("No current target");
         }
-    }
-}
-
-void GameSettings::OnCast(GW::HookStatus*, const uint32_t agent_id, const uint32_t slot, const uint32_t target_id, uint32_t /* call_target */)
-{
-    if (!(target_id && agent_id == GW::Agents::GetPlayerId())) {
-        return;
-    }
-    const GW::Skillbar* skill_bar = GW::SkillbarMgr::GetPlayerSkillbar();
-    const GW::AgentLiving* me = GW::Agents::GetPlayerAsAgentLiving();
-    const GW::Agent* target = GW::Agents::GetAgentByID(target_id);
-    if (!skill_bar || !me || !target) {
-        return;
-    }
-    if (me->max_energy <= 0 || me->player_number <= 0 || target->agent_id == me->agent_id) {
-        return;
-    }
-    if (GetDistance(me->pos, target->pos) > GetSkillRange(skill_bar->skills[slot].skill_id)) {
-        pending_cast.reset(slot, target_id, 0);
     }
 }
 

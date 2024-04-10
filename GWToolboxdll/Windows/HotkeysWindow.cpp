@@ -52,6 +52,24 @@ namespace {
 
     TBHotkey* current_hotkey = nullptr;
 
+    std::queue<TBHotkey*> pending_hotkeys;
+    std::recursive_mutex pending_mutex;
+    void PushPendingHotkey(TBHotkey* hk) {
+        pending_mutex.lock();
+        pending_hotkeys.push(hk);
+        pending_mutex.unlock();
+    }
+    TBHotkey* PopPendingHotkey() {
+        TBHotkey* hk = nullptr;
+        pending_mutex.lock();
+        if (pending_hotkeys.size()) {
+            hk = pending_hotkeys.front();
+            pending_hotkeys.pop();
+        }
+        pending_mutex.unlock();
+        return hk;
+    }
+
     bool loaded_action_labels = false;
     // NB: GetActionLabel_Func() must be called when we're in-game, because it relies on other gw modules being loaded internally.
     // Because we only draw this module when we're in-game, we just need to call this from the Draw() loop instead of on Initialise()
@@ -187,6 +205,7 @@ namespace {
             if (!block_hotkeys && !hk->pressed
                 && ((activated && hk->trigger_on_gain_focus)
                     || (!activated && hk->trigger_on_lose_focus))) {
+                // Would be nice to use PushPendingHotkey here, but losing/gaining focus is a special case
                 hk->pressed = true;
                 current_hotkey = hk;
                 hk->Execute();
@@ -556,6 +575,7 @@ bool HotkeysWindow::WndProc(const UINT Message, const WPARAM wParam, LPARAM)
             break;
         case WM_XBUTTONDOWN:
         case WM_MBUTTONDOWN:
+        case WM_XBUTTONDBLCLK:
             if (LOWORD(wParam) & MK_MBUTTON) {
                 keyData = VK_MBUTTON;
             }
@@ -570,6 +590,9 @@ bool HotkeysWindow::WndProc(const UINT Message, const WPARAM wParam, LPARAM)
         case WM_MBUTTONUP:
             // leave keydata to none, need to handle special case below
             break;
+        case WM_MBUTTONDBLCLK:
+            keyData = VK_MBUTTON;
+            break;
         default:
             break;
     }
@@ -578,7 +601,9 @@ bool HotkeysWindow::WndProc(const UINT Message, const WPARAM wParam, LPARAM)
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
         case WM_XBUTTONDOWN:
-        case WM_MBUTTONDOWN: {
+        case WM_XBUTTONDBLCLK:
+        case WM_MBUTTONDOWN:
+        case WM_MBUTTONDBLCLK: {
             if (block_hotkeys) {
                 return true;
             }
@@ -599,10 +624,7 @@ bool HotkeysWindow::WndProc(const UINT Message, const WPARAM wParam, LPARAM)
                     && !hk->pressed
                     && keyData == hk->hotkey
                     && modifier == hk->modifier) {
-                    hk->pressed = true;
-                    current_hotkey = hk;
-                    hk->Toggle();
-                    current_hotkey = nullptr;
+                    PushPendingHotkey(hk);
                     if (hk->block_gw) {
                         triggered = true;
                     }
@@ -654,5 +676,12 @@ void HotkeysWindow::Update(const float)
         if (hotkeys[i]->ongoing) {
             hotkeys[i]->Execute();
         }
+    }
+    while (const auto hk = PopPendingHotkey()) {
+        hk->pressed = true;
+        current_hotkey = hk;
+        hk->Execute();
+        current_hotkey = nullptr;
+        hk->pressed = false;
     }
 }

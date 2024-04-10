@@ -19,6 +19,11 @@
 #include <GWCA/GameContainers/List.h>
 #include <GWCA/Constants/QuestIDs.h>
 #include <GWCA/Utilities/Hooker.h>
+#include <GWCA/Utilities/MemoryPatcher.h>
+
+#include <GWCA/Managers/RenderMgr.h>
+
+#include <d3d9on12.h>
 
 namespace {
     uint32_t* key_mappings_array = nullptr;
@@ -521,6 +526,148 @@ namespace {
     }
 
     const char* section_name = "GuildWarsSettingsModule:Quest Log Entries Visible";
+
+    GW::MemoryPatcher display_graphics_version_ui_component;
+
+    using CreateUIComponent_pt = uint32_t(__cdecl*)(int frame_id,int behavior,int child_frame_id,void *ui_callback,wchar_t *name_enc, wchar_t *label);
+
+    CreateUIComponent_pt CreateUIComponent = nullptr;
+
+    bool DoesDeviceSupportInterface(IDirect3DDevice9* d3d9Device, const GUID interface_iid) {
+        if (!d3d9Device)
+            return false;
+        IUnknown* dxvkInterface = nullptr;
+
+        // Use the locally defined GUID
+        HRESULT hr = d3d9Device->QueryInterface(interface_iid, (void**)&dxvkInterface);
+
+        if (SUCCEEDED(hr)) {
+            dxvkInterface->Release();  // Release the DXVK-specific interface.
+            return true;
+        }
+
+        // The device does not support the DXVK-specific interface.
+        return false;
+    }
+
+    bool GetModuleFileInfo(HMODULE hModule, std::string& productName, std::string& productVersion, std::string& baseName) {
+        productName.clear();
+        productVersion.clear();
+        baseName.clear();
+        if (hModule == NULL) {
+            return false;
+        }
+
+        char dllPath[MAX_PATH];
+        if (GetModuleFileNameA(hModule, dllPath, MAX_PATH) == 0) {
+            return false;
+        }
+
+        // Extract the base name using std::filesystem::path directly
+        baseName = std::filesystem::path(dllPath).filename().string();
+
+        DWORD dummy;
+        DWORD versionSize = GetFileVersionInfoSizeA(dllPath, &dummy);
+
+        if (versionSize == 0) {
+            return false;
+        }
+
+        LPVOID versionInfo = malloc(versionSize);
+
+        if (!GetFileVersionInfoA(dllPath, 0, versionSize, versionInfo)) {
+            free(versionInfo);
+            return false;
+        }
+
+        UINT langCodepageSize;
+        LPVOID langCodepageInfo;
+        if (VerQueryValueA(versionInfo, "\\VarFileInfo\\Translation", &langCodepageInfo, &langCodepageSize)) {
+            DWORD* langCodepage = static_cast<DWORD*>(langCodepageInfo);
+
+            // Get Product Name
+            char nameQueryPath[256];
+            snprintf(nameQueryPath, sizeof(nameQueryPath) / sizeof(nameQueryPath[0]), "\\StringFileInfo\\%04X%04X\\ProductName", LOWORD(*langCodepage), HIWORD(*langCodepage));
+
+            LPVOID productNameValue;
+            UINT productNameValueSize;
+
+            if (VerQueryValueA(versionInfo, nameQueryPath, &productNameValue, &productNameValueSize)) {
+                productName.assign(static_cast<const char*>(productNameValue), productNameValueSize - 1);  // Exclude the null terminator
+            }
+
+            // Get Product Version
+            char versionQueryPath[256];
+            snprintf(versionQueryPath, sizeof(versionQueryPath) / sizeof(versionQueryPath[0]), "\\StringFileInfo\\%04X%04X\\ProductVersion", LOWORD(*langCodepage), HIWORD(*langCodepage));
+
+            LPVOID productVersionValue;
+            UINT productVersionValueSize;
+
+            if (VerQueryValueA(versionInfo, versionQueryPath, &productVersionValue, &productVersionValueSize)) {
+                productVersion.assign(static_cast<const char*>(productVersionValue), productVersionValueSize - 1);  // Exclude the null terminator
+            }
+        }
+
+        free(versionInfo);
+        return !productName.empty() && !productVersion.empty();
+    }
+
+    const wchar_t* GetGraphicsAPIName() {
+        const auto device = GW::Render::GetDevice();
+
+        // IID_IDirect3DDevice9On12
+        const bool d3d9on12_support = DoesDeviceSupportInterface(device, {0xe7fda234, 0xb589, 0x4049, {0x94, 0x0d, 0x88, 0x78, 0x97, 0x75, 0x31, 0xc8}});
+        if (d3d9on12_support) {
+            return L"D3D9On12";
+        }
+        // IID_DXVKInterface
+        const bool dxvk_support = DoesDeviceSupportInterface(device, {0x2eaa4b89, 0x0107, 0x4bdb, {0x87, 0xf7, 0x0f, 0x54, 0x1c, 0x49, 0x3c, 0xe0}});
+        if (dxvk_support) {
+            return L"DXVK";
+        }
+        return L"DirectX 9";
+    }
+
+    uint32_t OnCreateUIComponent_GraphicsVersion( int frame_id,int behavior,int child_frame_id,void *ui_callback,wchar_t *, wchar_t *label) {
+        std::string dll_product_name;
+        std::string dll_product_version;
+        std::string dll_base_name;
+
+        std::wstring new_name_enc;
+        new_name_enc += L"\x108\x107Renderer: ";
+        new_name_enc += GetGraphicsAPIName();
+        new_name_enc += L"\x1\x2\x102\x2\x108\x107";
+
+        GetModuleFileInfo(GetModuleHandle("d3d9.dll"), dll_product_name, dll_product_version, dll_base_name);
+
+        if (dll_product_name.size()) {
+            new_name_enc += L" (";
+            new_name_enc += GuiUtils::StringToWString(dll_base_name);
+            new_name_enc += L", ";
+            new_name_enc += GuiUtils::StringToWString(dll_product_name);
+            if (dll_product_version.size()) {
+                new_name_enc += L", ";
+                new_name_enc += GuiUtils::StringToWString(dll_product_version);
+            }
+            new_name_enc += L")";
+        }
+
+        GetModuleFileInfo(GetModuleHandle("dxgi.dll"), dll_product_name, dll_product_version, dll_base_name);
+        if (dll_product_name.size()) {
+            new_name_enc += L" (";
+            new_name_enc += GuiUtils::StringToWString(dll_base_name);
+            new_name_enc += L", ";
+            new_name_enc += GuiUtils::StringToWString(dll_product_name);
+            if (dll_product_version.size()) {
+                new_name_enc += L", ";
+                new_name_enc += GuiUtils::StringToWString(dll_product_version);
+            }
+            new_name_enc += L")";
+        }
+        new_name_enc += L"\x1";
+
+        return CreateUIComponent(frame_id, behavior, child_frame_id, ui_callback, new_name_enc.data(), label);
+    }
 }
 
 void GuildWarsSettingsModule::Initialize()
@@ -545,6 +692,17 @@ void GuildWarsSettingsModule::Initialize()
             GW::Hook::CreateHook(GetOrCreateQuestEntryGroup_Func, OnGetOrCreateQuestEntryGroup, (void**)&GetOrCreateQuestEntryGroup_Ret);
             GW::Hook::EnableHooks(GetOrCreateQuestEntryGroup_Func);
         }
+    }
+
+
+    address = GW::Scanner::Find("\x6a\x0a\x68\x5a\x05\x00\x00", "xxxxxxx", 0x1e);
+    if (address) {
+        CreateUIComponent = (CreateUIComponent_pt)GW::Scanner::FunctionFromNearCall(address);
+        if (CreateUIComponent) {
+            display_graphics_version_ui_component.SetRedirect(address, OnCreateUIComponent_GraphicsVersion);
+            display_graphics_version_ui_component.TogglePatch(true);
+        }
+
     }
 
     GW::Chat::CreateCommand(L"saveprefs", CmdSave);
@@ -639,6 +797,7 @@ void GuildWarsSettingsModule::Terminate()
     if (GetOrCreateQuestEntryGroup_Func) {
         GW::Hook::RemoveHook(GetOrCreateQuestEntryGroup_Func);
     }
+    display_graphics_version_ui_component.Reset();
 }
 
 void GuildWarsSettingsModule::DrawSettingsInternal()

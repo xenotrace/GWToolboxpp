@@ -5,6 +5,8 @@
 
 namespace GW::Constants {
     enum class MapID;
+    enum class ServerRegion;
+    enum class Language;
 }
 
 class RerollWindow : public ToolboxWindow {
@@ -46,7 +48,7 @@ public:
     // Hook to override status on login - allows us to keep FL status across rerolls without messing with UI
     static void OnSetStatus(GW::FriendStatus status);
 
-    static void CmdReroll(const wchar_t* message, int argc, LPWSTR* argv);
+    static void CmdReroll(const wchar_t* message, const int argc, const LPWSTR*);
 
     bool Reroll(const wchar_t* character_name, bool same_map = true, bool same_party = true);
     bool Reroll(const wchar_t* character_name, GW::Constants::MapID _map_id);
@@ -100,8 +102,8 @@ private:
     GW::FriendStatus online_status = GW::FriendStatus::Online;
     GW::Constants::MapID map_id = static_cast<GW::Constants::MapID>(0);
     int district_id = 0;
-    int region_id = 0;
-    int language_id = 0;
+    GW::Constants::ServerRegion region_id = (GW::Constants::ServerRegion)0;
+    GW::Constants::Language language_id = (GW::Constants::Language)0;
     uint32_t* guild_hall_uuid = nullptr;
     wchar_t initial_player_name[20] = {0};
     wchar_t reroll_to_player_name[20] = {0};
@@ -127,7 +129,7 @@ private:
         Done
     } reroll_stage = None;
 
-    uint32_t reroll_scroll_from_map_id = 0;
+    GW::Constants::MapID reroll_scroll_from_map_id = (GW::Constants::MapID)0;
 
     void RerollFailed(const wchar_t* reason);
 

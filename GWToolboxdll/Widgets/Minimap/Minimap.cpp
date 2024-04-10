@@ -205,7 +205,7 @@ namespace {
             if (const auto quest = GW::QuestMgr::GetActiveQuest()) {
                 struct QuestUIMsg {
                     GW::Constants::QuestID quest_id{};
-                    GW::Vec3f marker{};
+                    GW::GamePos marker{};
                     uint32_t h0024{};
                     GW::Constants::MapID map_to{};
                     uint32_t log_state{};
@@ -220,7 +220,26 @@ namespace {
             }
         });
     }
-}
+
+    void PreloadQuestMarkers() {
+        if (const GW::QuestLog* questLog = GW::QuestMgr::GetQuestLog(); questLog != nullptr) {
+            GW::GameThread::Enqueue([questLog]() {
+                auto activeQuestId = GW::QuestMgr::GetActiveQuestId();
+                auto mapId = GW::Map::GetMapID();
+
+                for (const auto& quest : *questLog) {
+                    // Limit requests to the server:
+                    // * Don't load the marker for the active quest - the game already handles that
+                    //   and us doing it will trigger an extra unwanted UI event
+                    // * Only request quests whose markers are not yet loaded (marker = (INF,INF))
+                    // * Only request quests whose destination zone is unknown or the current zone
+                    if(quest.quest_id != activeQuestId && (quest.map_to == GW::Constants::MapID::Count || quest.map_to == mapId) && quest.marker.x == INFINITY && quest.marker.y == INFINITY) {
+                        GW::QuestMgr::RequestQuestInfoId(quest.quest_id, true);
+                    }
+                }
+            });
+        }
+    }}
 
 void Minimap::DrawHelp()
 {
@@ -292,11 +311,6 @@ void Minimap::Initialize()
             pingslines_renderer.P046Callback(pak);
         }
     });
-    GW::StoC::RegisterPacketCallback<GW::Packet::StoC::CompassEvent>(&CompassEvent_Entry, [this](GW::HookStatus*, const GW::Packet::StoC::CompassEvent* pak) -> void {
-        if (visible) {
-            pingslines_renderer.P138Callback(pak);
-        }
-    });
     GW::StoC::RegisterPacketCallback<GW::Packet::StoC::PlayEffect>(&CompassEvent_Entry, [this](const GW::HookStatus*, GW::Packet::StoC::PlayEffect* pak) -> void {
         if (visible) {
             if (GW::Map::GetInstanceType() == GW::Constants::InstanceType::Explorable) {
@@ -323,10 +337,15 @@ void Minimap::Initialize()
         GW::UI::UIMessage::kMapChange,
         GW::UI::UIMessage::kMapLoaded,
         GW::UI::UIMessage::kChangeTarget,
-        GW::UI::UIMessage::kSkillActivated
+        GW::UI::UIMessage::kSkillActivated,
+        GW::UI::UIMessage::kCompassDraw
     };
     for (const auto message_id : hook_messages) {
         RegisterUIMessageCallback(&UIMsg_Entry, message_id, OnUIMessage);
+    }
+
+    if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Loading) {
+        PreloadQuestMarkers();
     }
 
     last_moved = TIMER_INIT();
@@ -336,9 +355,10 @@ void Minimap::Initialize()
     GW::Chat::CreateCommand(L"flag", &OnFlagHeroCmd);
 }
 
-void Minimap::OnUIMessage(GW::HookStatus*, const GW::UI::UIMessage msgid, void* wParam, void*)
+void Minimap::OnUIMessage(GW::HookStatus* status, const GW::UI::UIMessage msgid, void* wParam, void* lParam)
 {
     auto& instance = Instance();
+    instance.pingslines_renderer.OnUIMessage(status, msgid, wParam, lParam);
     switch (msgid) {
         case GW::UI::UIMessage::kMapLoaded: {
             instance.pmap_renderer.Invalidate();
@@ -351,6 +371,8 @@ void Minimap::OnUIMessage(GW::HookStatus*, const GW::UI::UIMessage msgid, void* 
                 SetWindowVisible(GW::UI::WindowID_Compass, true);
             }
             instance.is_observing = GW::Map::GetIsObserving();
+            // Cycle active quests to cache their markers
+            PreloadQuestMarkers();
         }
         break;
         case GW::UI::UIMessage::kSkillActivated: {
@@ -609,6 +631,15 @@ void Minimap::DrawSettingsInternal()
     ImGui::ShowHelp("Whether the map should be circular like the compass (default) or a square.");
 }
 
+ImGuiWindowFlags Minimap::GetWinFlags(ImGuiWindowFlags flags, const bool noinput_if_frozen) const
+{
+    flags = ToolboxWidget::GetWinFlags(flags, noinput_if_frozen);
+    if (snap_to_compass) {
+        flags |= ImGuiWindowFlags_NoInputs;
+    }
+    return flags;
+}
+
 void Minimap::LoadSettings(ToolboxIni* ini)
 {
     ToolboxWidget::LoadSettings(ini);
@@ -792,7 +823,7 @@ void Minimap::Draw(IDirect3DDevice9*)
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
     ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
     ImGui::SetNextWindowSize(ImVec2(500.0f, 500.0f), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin(Name(), nullptr, GetWinFlags(ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoBringToFrontOnFocus))) {
+    if (ImGui::Begin(Name(), nullptr, GetWinFlags(ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoBringToFrontOnFocus, true))) {
         // window pos are already rounded by imgui, so casting is no big deal
         if (!snap_to_compass) {
             location.x = static_cast<int>(ImGui::GetWindowPos().x);
@@ -1307,7 +1338,7 @@ bool Minimap::OnMouseDown(const UINT, const WPARAM, const LPARAM lParam)
         return true;
     }
 
-    if (!lock_move) {
+    if (!lock_move && !snap_to_compass) {
         return true;
     }
 

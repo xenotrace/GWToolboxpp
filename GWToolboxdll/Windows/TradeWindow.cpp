@@ -24,25 +24,45 @@
 
 #include "GWToolbox.h"
 
-// Every connection cost 30 seconds.
-// You have 2 tries.
-// After that, you can try every 30 seconds.
-constexpr uint32_t COST_PER_CONNECTION_MS = 30 * 1000;
-constexpr uint32_t COST_PER_CONNECTION_MAX_MS = 60 * 1000;
-static const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-using easywsclient::WebSocket;
-using nlohmann::json;
-using json_vec = std::vector<json>;
+namespace {
+    // Every connection cost 30 seconds.
+    // You have 2 tries.
+    // After that, you can try every 30 seconds.
+    constexpr uint32_t COST_PER_CONNECTION_MS = 30 * 1000;
+    constexpr uint32_t COST_PER_CONNECTION_MAX_MS = 60 * 1000;
+    static const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    using easywsclient::WebSocket;
+    using nlohmann::json;
+    using json_vec = std::vector<json>;
 
-constexpr char ws_host_kmd[] = "wss://kamadan.gwtoolbox.com";
-constexpr char https_host_kmd[] = "https://kamadan.gwtoolbox.com";
-constexpr char ws_host_asc[] = "wss://ascalon.gwtoolbox.com";
-constexpr char https_host_asc[] = "https://ascalon.gwtoolbox.com/";
+    constexpr char ws_host_kmd[] = "wss://kamadan.gwtoolbox.com";
+    constexpr char https_host_kmd[] = "https://kamadan.gwtoolbox.com";
+    constexpr char ws_host_asc[] = "wss://ascalon.gwtoolbox.com";
+    constexpr char https_host_asc[] = "https://ascalon.gwtoolbox.com/";
 
-static wchar_t* GetMessageCore()
+    wchar_t* GetMessageCore()
+    {
+        GW::Array<wchar_t>* buff = &GW::GetGameContext()->world->message_buff;
+        return buff ? buff->begin() : nullptr;
+    }
+
+    
+}
+void TradeWindow::CmdPricecheck(const wchar_t*, const int argc, const LPWSTR* argv)
 {
-    GW::Array<wchar_t>* buff = &GW::GetGameContext()->world->message_buff;
-    return buff ? buff->begin() : nullptr;
+    if (argc < 2) {
+        return Log::Error("Try '/pc <item>'");
+    }
+
+    std::string item_to_search;
+    for (int i = 1; i < argc; i++) {
+        if (i > 1) {
+            item_to_search += " ";
+        }
+        item_to_search += GuiUtils::WStringToString(argv[i]);
+    }
+    Log::Info("Searching trade for \"%s\"...", item_to_search.c_str());
+    Instance().search(item_to_search, true);
 }
 
 void TradeWindow::OnMessageLocal(GW::HookStatus* status, const GW::Packet::StoC::MessageLocal* pak)
@@ -86,23 +106,6 @@ void TradeWindow::OnMessageLocal(GW::HookStatus* status, const GW::Packet::StoC:
     if (!Instance().IsTradeAlert(message_utf8)) {
         status->blocked = true;
     }
-}
-
-void TradeWindow::CmdPricecheck(const wchar_t*, const int argc, const LPWSTR* argv)
-{
-    if (argc < 2) {
-        return Log::Error("Try '/pc <item>'");
-    }
-
-    std::string item_to_search;
-    for (int i = 1; i < argc; i++) {
-        if (i > 1) {
-            item_to_search += " ";
-        }
-        item_to_search += GuiUtils::WStringToString(argv[i]);
-    }
-    Log::Info("Searching trade for \"%s\"...", item_to_search.c_str());
-    Instance().search(item_to_search, true);
 }
 
 void TradeWindow::Initialize()
@@ -165,7 +168,7 @@ bool TradeWindow::GetInKamadanAE1(const bool check_district)
         case MapID::Kamadan_Jewel_of_Istan_Halloween_outpost:
         case MapID::Kamadan_Jewel_of_Istan_Wintersday_outpost:
         case MapID::Kamadan_Jewel_of_Istan_Canthan_New_Year_outpost:
-            return !check_district || (GW::Map::GetDistrict() == 1 && GW::Map::GetRegion() == Region::America);
+            return !check_district || (GW::Map::GetDistrict() == 1 && GW::Map::GetRegion() == ServerRegion::America);
         default:
             return false;
     }
@@ -177,7 +180,7 @@ bool TradeWindow::GetInAscalonAE1(const bool check_district)
     switch (GW::Map::GetMapID()) {
         case MapID::Ascalon_City_pre_searing:
             return !check_district ||
-                   (GW::Map::GetDistrict() == 1 && GW::Map::GetRegion() == Region::America);
+                   (GW::Map::GetDistrict() == 1 && GW::Map::GetRegion() == ServerRegion::America);
         default:
             return false;
     }
@@ -465,15 +468,7 @@ void TradeWindow::Draw(IDirect3DDevice9*)
                 }
             }
             else {
-                struct {
-                    uint32_t header = GAME_CMSG_PARTY_SEARCH_SEEK;
-                    uint32_t search_type = 0;
-                    wchar_t advert[32]{};
-                    uint32_t hard_mode = 0;
-                } packet;
                 const std::wstring out = GuiUtils::StringToWString(player_party_search_text);
-                swprintf(packet.advert, _countof(packet.advert), L"%s", out.c_str());
-
                 GW::PartyMgr::SearchParty(search_type, out.data());
             }
         }

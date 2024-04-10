@@ -122,6 +122,8 @@ namespace {
 
     PartyMember* GetPartyMemberByPartyIdx(const uint32_t party_idx)
     {
+        if (pending_party_members)
+            return nullptr;
         const auto found = std::ranges::find_if(party_members, [party_idx](const auto party_member) {
             return party_member->party_idx == party_idx;
         });
@@ -130,15 +132,28 @@ namespace {
 
     PartyMember* GetPartyMemberByAgentId(const uint32_t agent_id)
     {
+        if (pending_party_members)
+            return nullptr;
         // NB: This function is called on the game thread whenever a skill is used. Would it be much performance difference to keep a std::map for this?
         const auto found = std::ranges::find_if(party_members, [agent_id](const auto party_member) {
             return party_member->agent_id == agent_id;
         });
         return found != party_members.end() ? *found : nullptr;
     }
-
     PartyMember* GetPartyMemberByEncName(const wchar_t* enc_name)
     {
+        /* 
+        @Cleanup: 
+         - What happens when 3 players each bring the same hero ? "Ebon Vanguard Mesmer" x 2
+         - GW sometimes sends the enc_name packet after the NPC is created; would this affect henchmen?
+         - Players can have names that match heros or henchmen in some edge cases
+         - Obfuscator could be a problem
+
+         Instead maybe hook into the PartyPlayerAdd / PartyAllyAdd / PartyHeroAdd packets, then identify by player owner / hero id instead of just using name
+         */
+
+        if (pending_party_members)
+            return nullptr;
         const auto found = std::ranges::find_if(party_members, [enc_name](const auto party_member) {
             return party_member->name_enc == enc_name;
         });

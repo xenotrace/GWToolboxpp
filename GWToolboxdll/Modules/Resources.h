@@ -8,9 +8,10 @@ namespace GuiUtils {
 }
 
 namespace GW::Constants {
-    enum class Profession;
+    enum class Profession : uint32_t;
     enum class MapID;
     enum class SkillID : uint32_t;
+    enum class Language;
 }
 namespace GW {
     struct Item;
@@ -73,7 +74,7 @@ public:
     // Generic callback used when loading async functions. If success is false, any error details are held in response.
     using AsyncLoadCallback = std::function<void(bool success, const std::wstring& response)>;
     // Callback for binary, usually only curl stuff; try to stick to wstrings where possible
-    using AsyncLoadMbCallback = std::function<void(bool success, const std::string& response)>;
+    using AsyncLoadMbCallback = std::function<void(bool success, const std::string& response, void* context)>;
 
     // Load from file to D3DTexture, runs callback on completion
     static void LoadTexture(IDirect3DTexture9** texture, const std::filesystem::path& path_to_file, AsyncLoadCallback callback = nullptr);
@@ -86,6 +87,8 @@ public:
 
     // Guaranteed to return a pointer, but reference will be null until the texture has been loaded
     static IDirect3DTexture9** GetProfessionIcon(GW::Constants::Profession p);
+    // Guaranteed to return a pointer, but reference will be null until the texture has been loaded
+    static IDirect3DTexture9** GetDamagetypeImage(std::string dmg_type);
     // Fetches skill image from gw dat via file_id
     static IDirect3DTexture9** GetSkillImage(GW::Constants::SkillID skill_id);
     // Fetches skill page from GWW, parses out the image for the skill then downloads that to disk
@@ -106,7 +109,7 @@ public:
     // Guaranteed to return a pointer, but may not yet be decoded.
     static GuiUtils::EncString* GetMapName(GW::Constants::MapID map_id);
     // Guaranteed to return a pointer, but may not yet be decoded.
-    static GuiUtils::EncString* DecodeStringId(uint32_t enc_str_id);
+    static GuiUtils::EncString* DecodeStringId(const uint32_t enc_str_id, GW::Constants::Language language = (GW::Constants::Language)0xff);
 
     // Ensure file exists on disk, download from remote location if not found. If an error occurs, details are held in error string
     static void EnsureFileExists(const std::filesystem::path& path_to_file, const std::string& url, const AsyncLoadCallback& callback);
@@ -118,13 +121,13 @@ public:
     // download to memory, blocking. If an error occurs, details are held in response string
     static bool Download(const std::string& url, std::string& response);
     // download to memory, async, calls callback on completion. If an error occurs, details are held in response string
-    void Download(const std::string& url, AsyncLoadMbCallback callback) const;
+    static void Download(const std::string& url, AsyncLoadMbCallback callback, void* wparam = nullptr);
 
 
     // download to memory, blocking. If an error occurs, details are held in response string
     static bool Post(const std::string& url, const std::string& payload, std::string& response);
     // download to memory, async, calls callback on completion. If an error occurs, details are held in response string
-    static void Post(const std::string& url, const std::string& payload, AsyncLoadMbCallback callback);
+    static void Post(const std::string& url, const std::string& payload, AsyncLoadMbCallback callback, void* wparam = nullptr);
 
     // Stops the worker thread once it's done with the current jobs.
     void EndLoading() const;

@@ -27,19 +27,17 @@ public:
 
     static HMODULE GetDLLModule();
     static void Draw(IDirect3DDevice9* device);
-    static void Update(GW::HookStatus*);
 
     static void Initialize();
-    static void Terminate();
-
+    static void SignalTerminate(bool detach_dll = true);
+    static void Update(GW::HookStatus* status = nullptr);
+    static void Enable();
+    static void Disable();
     static bool CanTerminate();
 
     static std::filesystem::path SaveSettings();
     static std::filesystem::path LoadSettings();
     static bool SetSettingsFolder(const std::filesystem::path& path);
-
-    static void StartSelfDestruct();
-
 
     //const std::vector<ToolboxModule*>& GetModules();
     static const std::vector<ToolboxModule*>& GetAllModules();
@@ -60,4 +58,10 @@ public:
     static bool ToggleModule(ToolboxWidget& m, bool enable = true);
     static bool ToggleModule(ToolboxWindow& m, bool enable = true);
     static bool ToggleModule(ToolboxModule& m, bool enable = true);
+
+private:
+    static void DrawInitialising(IDirect3DDevice9* device);
+    static void DrawTerminating(IDirect3DDevice9* device);
+    static void UpdateInitialising(float);
+    static void UpdateTerminating(float);
 };

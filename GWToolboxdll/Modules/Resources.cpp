@@ -54,20 +54,43 @@ namespace {
         }
     }
 
-    const char* profession_icon_urls[] = {"", "8/87/Warrior-tango-icon-48", "e/e8/Ranger-tango-icon-48", "5/53/Monk-tango-icon-48", "b/b1/Necromancer-tango-icon-48", "b/b1/Mesmer-tango-icon-48", "4/47/Elementalist-tango-icon-48",
-                                          "2/2b/Assassin-tango-icon-48", "5/5b/Ritualist-tango-icon-48", "5/5e/Paragon-tango-icon-48", "3/38/Dervish-tango-icon-48"};
+    constexpr std::array profession_icon_urls = {
+        "",
+        "8/87/Warrior-tango-icon-48",
+        "e/e8/Ranger-tango-icon-48",
+        "5/53/Monk-tango-icon-48",
+        "b/b1/Necromancer-tango-icon-48",
+        "b/b1/Mesmer-tango-icon-48",
+        "4/47/Elementalist-tango-icon-48",
+        "2/2b/Assassin-tango-icon-48",
+        "5/5b/Ritualist-tango-icon-48",
+        "5/5e/Paragon-tango-icon-48",
+        "3/38/Dervish-tango-icon-48"
+    };
+    std::map<uint32_t, IDirect3DTexture9**> profession_icons;
     std::map<GW::Constants::SkillID, IDirect3DTexture9**> skill_images;
     std::map<std::wstring, IDirect3DTexture9**> item_images;
     std::map<std::string, IDirect3DTexture9**> guild_wars_wiki_images;
-    std::map<uint32_t, IDirect3DTexture9**> profession_icons;
+    const std::map<std::string, const char*> damagetype_icon_urls = {
+        {"Blunt damage", "1/19/Blunt_damage.png/60px-Blunt_damage.png"},
+        {"Piercing damage", "1/1a/Piercing_damage.png/60px-Piercing_damage.png"},
+        {"Slashing damage", "3/3c/Slashing_damage.png/60px-Slashing_damage.png"},
+        {"Cold damage", "4/48/Cold_damage.png/60px-Cold_damage.png"},
+        {"Earth damage", "b/bb/Earth_damage.png/60px-Earth_damage.png"},
+        {"Fire damage", "6/6a/Fire_damage.png/60px-Fire_damage.png"},
+        {"Lightning damage", "0/06/Lightning_damage.png/60px-Lightning_damage.png"},
+    };
+
+    std::map<std::string, IDirect3DTexture9**> damagetype_icons;
     std::map<GW::Constants::MapID, GuiUtils::EncString*> map_names;
-    std::map<uint32_t, GuiUtils::EncString*> encoded_string_ids;
+    std::unordered_map<GW::Constants::Language, std::unordered_map<uint32_t, GuiUtils::EncString*>> encoded_string_ids;
     std::filesystem::path current_settings_folder;
     constexpr size_t MAX_WORKERS = 5;
     const wchar_t* GUILD_WARS_WIKI_FILES_PATH = L"img\\gww_files";
     const wchar_t* SKILL_IMAGES_PATH = L"img\\skills";
     const wchar_t* ITEM_IMAGES_PATH = L"img\\items";
     const wchar_t* PROF_ICONS_PATH = L"img\\professions";
+    const wchar_t* DMGTYPE_ICONS_PATH = L"img\\damagetypes";
 
     std::recursive_mutex worker_mutex;
     std::recursive_mutex main_mutex;
@@ -359,8 +382,10 @@ void Resources::Cleanup()
         delete img;
     }
     guild_wars_wiki_images.clear();
-    for (const auto& img : encoded_string_ids | std::views::values) {
-        delete img;
+    for (const auto& enc_strings : encoded_string_ids | std::views::values) {
+        for (const auto& enc_string : enc_strings | std::views::values) {
+            delete enc_string;
+        }
     }
     encoded_string_ids.clear();
     map_names.clear(); // NB: Map names are pointers to encoded_string_ids
@@ -500,13 +525,13 @@ bool Resources::Download(const std::string& url, std::string& response)
     return true;
 }
 
-void Resources::Download(const std::string& url, AsyncLoadMbCallback callback) const
+void Resources::Download(const std::string& url, AsyncLoadMbCallback callback, void* context)
 {
-    EnqueueWorkerTask([this, url, callback] {
+    EnqueueWorkerTask([url, callback, context] {
         std::string response;
         bool ok = Download(url, response);
-        EnqueueMainTask([callback, ok, response] {
-            callback(ok, response);
+        EnqueueMainTask([callback, ok, response, context] {
+            callback(ok, response, context);
         });
     });
 }
@@ -532,13 +557,13 @@ bool Resources::Post(const std::string& url, const std::string& payload, std::st
     return true;
 }
 
-void Resources::Post(const std::string& url, const std::string& payload, AsyncLoadMbCallback callback)
+void Resources::Post(const std::string& url, const std::string& payload, AsyncLoadMbCallback callback, void* wparam)
 {
-    EnqueueWorkerTask([url, payload, callback] {
+    EnqueueWorkerTask([url, payload, callback, wparam] {
         std::string response;
         bool ok = Post(url, payload, response);
-        EnqueueMainTask([callback, ok, response] {
-            callback(ok, response);
+        EnqueueMainTask([callback, ok, response, wparam] {
+            callback(ok, response, wparam);
         });
     });
 }
@@ -777,6 +802,29 @@ IDirect3DTexture9** Resources::GetProfessionIcon(GW::Constants::Profession p)
     return texture;
 }
 
+IDirect3DTexture9** Resources::GetDamagetypeImage(std::string dmg_type)
+{
+    if (damagetype_icons.contains(dmg_type)) {
+        return damagetype_icons.at(dmg_type);
+    }
+    const auto texture = new IDirect3DTexture9*;
+    *texture = nullptr;
+    damagetype_icons[dmg_type] = texture;
+    if (damagetype_icon_urls.contains(dmg_type)) {
+        const auto path = GetPath(DMGTYPE_ICONS_PATH);
+        EnsureFolderExists(path);
+        const auto local_path = path / GuiUtils::SanitiseFilename(dmg_type + ".png");
+        const auto remote_path = std::format("https://wiki.guildwars.com/images/thumb/{}", damagetype_icon_urls.at(dmg_type));
+        LoadTexture(texture, local_path, remote_path, [dmg_type](const bool success, const std::wstring& error) {
+            if (!success) {
+                const auto dmg_type_wstr = GuiUtils::StringToWString(dmg_type);
+                Log::ErrorW(L"Failed to load icon for %d\n%s", dmg_type_wstr.c_str(), error.c_str());
+            }
+        });
+    }
+    return texture;
+}
+
 IDirect3DTexture9** Resources::GetGuildWarsWikiImage(const char* filename, size_t width)
 {
     ASSERT(filename && filename[0]);
@@ -817,7 +865,7 @@ IDirect3DTexture9** Resources::GetGuildWarsWikiImage(const char* filename, size_
     // No local file found; download from wiki via skill link URL
     std::string wiki_url = "https://wiki.guildwars.com/wiki/File:";
     wiki_url.append(GuiUtils::UrlEncode(filename, '_'));
-    Instance().Download(wiki_url.c_str(), [texture, filename_sanitised, callback, width](const bool ok, const std::string& response) {
+    Instance().Download(wiki_url.c_str(), [texture, filename_sanitised, callback, width](const bool ok, const std::string& response, void*) {
         if (!ok) {
             callback(ok, GuiUtils::StringToWString(response));
             return; // Already logged whatever errors
@@ -862,8 +910,8 @@ IDirect3DTexture9** Resources::GetSkillImage(GW::Constants::SkillID skill_id)
     const auto skill = GW::SkillbarMgr::GetSkillConstantData(skill_id);
     ASSERT(skill && skill->icon_file_id);
     return GwDatTextureModule::LoadTextureFromFileId(skill->icon_file_id);
-
 }
+
 IDirect3DTexture9** Resources::GetSkillImageFromGWW(GW::Constants::SkillID skill_id)
 {
     if (skill_images.contains(skill_id)) {
@@ -904,7 +952,7 @@ IDirect3DTexture9** Resources::GetSkillImageFromGWW(GW::Constants::SkillID skill
     // No local file found; download from wiki via skill link URL
     char url[128];
     snprintf(url, _countof(url), "https://wiki.guildwars.com/wiki/Game_link:Skill_%d", skill_id);
-    Instance().Download(url, [texture, skill_id, callback](const bool ok, const std::string& response) {
+    Instance().Download(url, [texture, skill_id, callback](const bool ok, const std::string& response, void*) {
         if (!ok) {
             callback(ok, GuiUtils::StringToWString(response));
             return; // Already logged whatever errors
@@ -970,18 +1018,23 @@ GuiUtils::EncString* Resources::GetMapName(const GW::Constants::MapID map_id)
     return ret;
 }
 
-GuiUtils::EncString* Resources::DecodeStringId(const uint32_t enc_str_id)
+GuiUtils::EncString* Resources::DecodeStringId(const uint32_t enc_str_id, GW::Constants::Language language)
 {
-    const auto found = encoded_string_ids.find(enc_str_id);
-    if (found != encoded_string_ids.end()) {
-        return found->second;
+    if (language == (GW::Constants::Language)0xff)
+        language = static_cast<GW::Constants::Language>(GW::UI::GetPreference(GW::UI::NumberPreference::TextLanguage));
+    const auto by_language = encoded_string_ids.find(language);
+    if (by_language != encoded_string_ids.end()) {
+        const auto found = by_language->second.find(enc_str_id);
+        if (found != by_language->second.end())
+            return found->second;
     }
     const auto enc_string = new GuiUtils::EncString(enc_str_id, false);
-    encoded_string_ids[enc_str_id] = enc_string;
+    encoded_string_ids[language][enc_str_id] = enc_string;
     return enc_string;
 }
 
-IDirect3DTexture9** Resources::GetItemImage(GW::Item* item) {
+IDirect3DTexture9** Resources::GetItemImage(GW::Item* item)
+{
     if (!(item && item->model_file_id))
         return nullptr;
     uint32_t model_id_to_load = 0;
@@ -992,7 +1045,7 @@ IDirect3DTexture9** Resources::GetItemImage(GW::Item* item) {
     if (is_composite_item) {
         // Armor/runes
         const auto model_file_info = GW::Items::GetCompositeModelInfo(item->model_file_id);
-        if(!model_id_to_load)
+        if (!model_id_to_load)
             model_id_to_load = model_file_info->file_ids[0xa];
         if (!model_id_to_load)
             model_id_to_load = is_female ? model_file_info->file_ids[5] : model_file_info->file_ids[0];
@@ -1035,7 +1088,7 @@ IDirect3DTexture9** Resources::GetItemImage(const std::wstring& item_name)
 
     // No local file found; download from wiki via searching by the item name; the wiki will usually return a 302 redirect if its an exact item match
     const std::string search_str = GuiUtils::WikiUrl(item_name);
-    Instance().Download(search_str, [texture, item_name, callback](const bool ok, const std::string& response) {
+    Instance().Download(search_str, [texture, item_name, callback](const bool ok, const std::string& response, void*) {
         if (!ok) {
             callback(ok, GuiUtils::StringToWString(response));
             return;

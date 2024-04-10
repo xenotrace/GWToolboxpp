@@ -1,4 +1,4 @@
-﻿module;
+module;
 
 #include "stl.h"
 #include <GWCA/Constants/Constants.h>
@@ -134,12 +134,12 @@ export namespace PluginUtils {
         bool decoded = false;
         bool sanitised = false;
         virtual void sanitise();
-        GW::Constants::TextLanguage language_id = static_cast<GW::Constants::TextLanguage>(-1);
+        GW::Constants::Language language_id = static_cast<GW::Constants::Language>(-1);
         static void OnStringDecoded(void* param, wchar_t* decoded);
 
     public:
         // Set the language for decoding this encoded string. If the language has changed, resets the decoded result. Returns this for chaining.
-        EncString* language(GW::Constants::TextLanguage l = static_cast<GW::Constants::TextLanguage>(-1));
+        EncString* language(GW::Constants::Language l = static_cast<GW::Constants::Language>(-1));
         bool IsDecoding() const { return decoding && decoded_ws.empty(); };
         // Recycle this EncString by passing a new encoded string id to decode.
         // Set sanitise to true to automatically remove guild tags etc from the string
@@ -496,7 +496,7 @@ namespace PluginUtils {
         PLUGIN_ASSERT(size_needed != 0);
         std::string strTo(size_needed, 0);
         PLUGIN_ASSERT(WideCharToMultiByte(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), strTo.data(), size_needed, NULL, NULL));
-        return std::move(strTo);
+        return strTo;
     }
 
     // Makes sure the file name doesn't have chars that won't be allowed on disk
@@ -568,7 +568,7 @@ namespace PluginUtils {
         PLUGIN_ASSERT(size_needed != 0);
         std::wstring wstrTo(size_needed, 0);
         PLUGIN_ASSERT(MultiByteToWideChar(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), wstrTo.data(), size_needed));
-        return std::move(wstrTo);
+        return wstrTo;
     }
 
     std::wstring SanitizePlayerName(const std::wstring& s)
@@ -902,7 +902,7 @@ namespace PluginUtils {
         }
     }
 
-    EncString* EncString::language(const GW::Constants::TextLanguage l)
+    EncString* EncString::language(const GW::Constants::Language l)
     {
         if (language_id == l) {
             return this;
@@ -931,7 +931,7 @@ namespace PluginUtils {
     {
         if (!decoded && !decoding && !encoded_ws.empty()) {
             decoding = true;
-            GW::UI::AsyncDecodeStr(encoded_ws.c_str(), OnStringDecoded, this, static_cast<uint32_t>(language_id));
+            GW::UI::AsyncDecodeStr(encoded_ws.c_str(), OnStringDecoded, this, language_id);
         }
         sanitise();
         return decoded_ws;
@@ -970,7 +970,7 @@ namespace PluginUtils {
         out.resize(size + 1);
         PLUGIN_ASSERT(vsnprintf(out.data(), out.size(), msg, args) <= size);
         va_end(args);
-        return std::move(out);
+        return out;
     }
 
     std::wstring format(const wchar_t* msg, ...)
@@ -982,7 +982,7 @@ namespace PluginUtils {
         out.resize(size + 1);
         PLUGIN_ASSERT(_vsnwprintf(out.data(), out.size(), msg, args) <= size);
         va_end(args);
-        return std::move(out);
+        return out;
     }
 
     std::string& EncString::string()

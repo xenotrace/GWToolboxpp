@@ -170,7 +170,7 @@ namespace {
         packet["channel_name"] = channel_id;
         packet["expires_in_days"] = 1;
 
-        Resources::Post("https://invites.teamspeak.com/servers/create", packet.dump(), [callback](const bool success, const std::string& response) {
+        Resources::Post("https://invites.teamspeak.com/servers/create", packet.dump(), [callback](const bool success, const std::string& response, void*) {
             if (!success) {
                 Log::Error("Failed to get teamspeak invite link (1)");
                 Log::Log("%s", response.c_str());
@@ -191,7 +191,7 @@ namespace {
         });
     }
 
-    void OnTeamspeakCommand(const wchar_t*, int, LPWSTR*)
+    void OnTeamspeakCommand(const wchar_t*, const int, const LPWSTR*)
     {
         if (!IsConnected()) {
             Log::Error("GWToolbox isn't connected to Teamspeak 5");
